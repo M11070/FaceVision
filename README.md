@@ -2,6 +2,16 @@
 
 Real-time facial recognition, multi-face tracking and hand gesture recognition on consumer hardware. A personal computer vision prototype developed with AI-assisted software engineering, hands-on testing and iterative performance evaluation.
 
+## Visual overview
+
+![Face tracking and owner matching schematic](docs/face-tracking.svg)
+
+*Illustrative schematic of the interface and label logic, not a screenshot or a recognition test.*
+
+![Seven supported gestures](docs/gestures.svg)
+
+*Illustrative hand poses for the seven built-in gesture classes. The application draws bounding boxes and text, not hand skeletons.*
+
 ## Features
 
 - YuNet face detection and SFace matching against a voluntarily enrolled owner profile.
@@ -37,6 +47,8 @@ The owner profile is stored only locally under `data/owner.npy`. Do not upload t
 
 ## Architecture
 
+![FaceVision local processing architecture](docs/architecture.svg)
+
 - `app.py`: camera, recognition pipeline and rendering
 - `face_vision.py`: YuNet/SFace, profile storage, model integrity checks
 - `tracking.py`: temporary tracks, enrollment and identity decisions
@@ -52,6 +64,8 @@ After installation, run:
 
 ## Measured prototype performance
 
+![Historical gesture recognition A/B benchmark](docs/performance.svg)
+
 The supplied local test report dated 27 November 2026 records a single short A/B run per configuration, with 3 seconds of warmup and 20 seconds of measurement at 640 x 480:
 
 | Gesture recognition | Completed FPS | Full-cycle p95 |
@@ -63,7 +77,7 @@ The measured FPS difference was -0.46%; 258 processed frames included an OWNER m
 
 ## Limitations and intended use
 
-Research and educational prototype; **not a security or authentication product**. No passive liveness/anti-spoofing: photographs, screens and statues can trigger face detections or identity matches. Tracking can fail or swap IDs during occlusion. Lighting, pose, distance and camera resolution affect recognition. Use only with informed participants and avoid surveillance or collection of other people's biometric data. No images, personal enrollment vectors or model binaries are distributed here.
+Research and educational prototype; **not a security or authentication product**. No passive liveness/anti-spoofing: photographs, screens and statues can trigger face detections or identity matches. Tracking can fail or swap IDs during occlusion. Lighting, pose, distance and camera resolution affect recognition. Use only with informed participants and avoid surveillance or collection of other people's biometric data. No personal enrollment vectors, original webcam captures or model binaries are distributed here. Documentation graphics are illustrative unless explicitly identified as measured data.
 
 ## Credits and licensing
 
