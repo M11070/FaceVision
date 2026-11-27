@@ -1,0 +1,27 @@
+{
+  "conditions": {
+    "seconds": 20.0,
+    "warmup": 3.0,
+    "rounds": 1,
+    "camera": 0,
+    "size": "640x480",
+    "gesture_fps": 20
+  },
+  "summary": {
+    "off": {
+      "runs": 1,
+      "median_completed_fps": 19.995032034340515,
+      "median_full_cycle_p95_ms": 64.96,
+      "face_and_two_hands_frames": 0,
+      "owner_and_two_hands_frames": 0
+    },
+    "on": {
+      "runs": 1,
+      "median_completed_fps": 19.90326057609144,
+      "median_full_cycle_p95_ms": 64.99,
+      "face_and_two_hands_frames": 258,
+      "owner_and_two_hands_frames": 258
+    },
+    "fps_change_percent": -0.45897129892795707
+  }
+}

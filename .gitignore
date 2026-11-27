@@ -1,0 +1,20 @@
+# Local biometric profiles and experimental data
+/data/
+*.npy
+*.npz
+/results/
+/PRETHODNA_MERENJA/
+# Third-party model weights and transient downloads
+/models/*.onnx
+/models/*.task
+/models/*.part
+# Python and environment
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+.env.*
+*.zip
+*.rar
