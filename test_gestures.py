@@ -53,6 +53,69 @@ class GestureChecks(unittest.TestCase):
         self.assertIsNone(s.update([hand(gesture=None)],.15)[0].gesture)
         self.assertEqual(s.update([hand()],.2)[0].gesture,'Open_Palm')
 
+    def test_tracking_provenance_and_continuous_confirmation(self):
+        s=Stabilizer(epoch=4)
+        for i in range(7):
+            views=s.update([hand()],i*.05)
+        first_id=views[0].track_id
+        self.assertEqual(first_id[0],4)
+        self.assertAlmostEqual(views[0].confirmed_since,.1)
+        self.assertAlmostEqual(views[0].observed_at,.3)
+        self.assertFalse(views[0].association_ambiguous)
+        uncertain=s.update([hand(gesture=None)],.35)[0]
+        self.assertEqual(uncertain.track_id,first_id)
+        self.assertIsNone(uncertain.confirmed_since)
+        restored=s.update([hand()],.4)[0]
+        self.assertEqual(restored.track_id,first_id)
+        self.assertAlmostEqual(restored.confirmed_since,.4)
+        s.update([],.45)
+        self.assertNotEqual(s.update([hand()],.5)[0].track_id,first_id)
+
+    def test_neutral_release_provenance_requires_confident_none_not_low_gesture_score(self):
+        def result(name,score):
+            return NS(hand_landmarks=[[NS(x=.2+i*.005,y=.3+i*.01,z=0) for i in range(21)]],
+                      hand_world_landmarks=[[NS(x=0,y=0,z=0) for _ in range(21)]],
+                      handedness=[[NS(category_name='Right',score=.99)]],
+                      gestures=[[NS(category_name=name,score=score)]])
+        self.assertTrue(decode(result('None',.95))[0].neutral)
+        self.assertFalse(decode(result('Victory',.55))[0].neutral)
+        self.assertFalse(decode(result('None',.65))[0].neutral)
+        s=Stabilizer()
+        for i in range(5):
+            view=s.update(decode(result('None',.95)),i*.05)[0]
+        self.assertEqual(view.neutral_since,0.)
+        self.assertIsNone(view.gesture)
+        self.assertIsNone(s.update(decode(result('Victory',.55)),.25)[0].neutral_since)
+        self.assertEqual(s.update(decode(result('None',.95)),.3)[0].neutral_since,.3)
+
+    def test_tracking_provenance_fails_closed_for_two_to_one_and_one_to_two(self):
+        s=Stabilizer()
+        s.update([hand(.2),hand(.24)],0)
+        self.assertTrue(s.update([hand(.22)],.05)[0].association_ambiguous)
+        s=Stabilizer()
+        s.update([hand(.22)],0)
+        views=s.update([hand(.2),hand(.24)],.05)
+        self.assertTrue(any(h.association_ambiguous for h in views))
+
+    def test_known_handedness_flip_breaks_command_continuity(self):
+        s=Stabilizer()
+        old=s.update([hand()],0)[0]
+        changed=s.update([hand(side='Right')],.05)[0]
+        self.assertNotEqual(old.track_id,changed.track_id)
+        self.assertTrue(changed.association_ambiguous)
+        self.assertIsNone(changed.confirmed_since)
+
+    def test_global_assignment_tie_breaks_continuity_without_local_ties(self):
+        s=Stabilizer()
+        s.update([hand(.2),hand(.6)],0)
+        weights={(0.25,0.2):1., (0.25,0.6):.7,
+                 (0.55,0.2):.65, (0.55,0.6):.35}
+        # Both total assignments score 1.35, despite separated row/column scores.
+        with patch.object(s,'affinity',side_effect=lambda a,b:weights[a.box[0],b.box[0]]):
+            views=s.update([hand(.25),hand(.55)],.05)
+        self.assertTrue(all(h.association_ambiguous for h in views))
+        self.assertTrue(all(h.confirmed_since is None for h in views))
+
     def test_brief_candidate_and_disappearance(self):
         s=Stabilizer()
         for now in (0,.05,.1):

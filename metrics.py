@@ -51,4 +51,4 @@ class Measurement:
         path.mkdir(exist_ok=True)
         name = path/(uuid.uuid4().hex+'.json')
         name.write_text(json.dumps(meta | self.summary(), indent=2), encoding='utf-8')
-        print('Rezultat:', name, flush=True)
+        print('Result:', name, flush=True)

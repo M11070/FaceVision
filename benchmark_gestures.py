@@ -27,7 +27,7 @@ def compare(runs):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Stvarni A/B benchmark sa istom konfiguracijom kamere.')
+    parser = argparse.ArgumentParser(description='Live A/B benchmark with identical camera settings.')
     parser.add_argument('--seconds', type=float, default=30)
     parser.add_argument('--warmup', type=float, default=5)
     parser.add_argument('--rounds', type=int, default=2)
@@ -36,15 +36,15 @@ def main():
     parser.add_argument('--gesture-fps', type=float, default=20)
     args = parser.parse_args()
     if args.rounds < 1 or args.seconds <= 0 or args.warmup < 0:
-        parser.error('Neispravni parametri.')
+        parser.error('Invalid parameters.')
     folder = ROOT / 'results'
     folder.mkdir(exist_ok=True)
     runs = []
     for round_number in range(args.rounds):
         order = (False, True) if round_number % 2 == 0 else (True, False)
         for enabled in order:
-            print(f"Serija {round_number+1}/{args.rounds}: gestovi {'UKLJUCENI' if enabled else 'ISKLJUCENI'}. "
-                  'Drzi lice i obe ruke u kadru; menjaj gestove. G menja uslove i ponistava seriju.', flush=True)
+            print(f"Run {round_number+1}/{args.rounds}: gestures {'ENABLED' if enabled else 'DISABLED'}. "
+                  'Keep your face and both hands in view; change gestures. G invalidates the run.', flush=True)
             before = set(folder.glob('*.json'))
             command = [sys.executable, str(ROOT/'app.py'), '--size', args.size,
                        '--camera', str(args.camera), '--warmup', str(args.warmup),
@@ -54,13 +54,13 @@ def main():
             subprocess.run(command, cwd=ROOT, check=True)
             created = set(folder.glob('*.json'))-before
             if len(created) != 1:
-                raise RuntimeError('Nije pronadjen jednoznacan rezultat serije.')
+                raise RuntimeError('No unique result file was found for the run.')
             path = created.pop()
             row = json.loads(path.read_text(encoding='utf-8'))
             if not row.get('complete') or row['gesture_toggles'] or row['gestures']['error']:
-                raise RuntimeError(f'Serija nije validna: {path.name}')
+                raise RuntimeError(f'Invalid run: {path.name}')
             if enabled and not row['gestures']['ready']:
-                raise RuntimeError('Obrada ruku nije bila spremna.')
+                raise RuntimeError('Hand processing was not ready.')
             row['result_file'] = path.name
             runs.append(row)
             time.sleep(.3)  # release the existing camera between processes
@@ -71,7 +71,7 @@ def main():
     path = folder / ('gestures_ab_'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')+'.json')
     path.write_text(json.dumps(report, indent=2), encoding='utf-8')
     print(json.dumps(report['summary'], indent=2))
-    print('Poredjenje:', path)
+    print('Comparison:', path)
 
 
 if __name__ == '__main__':

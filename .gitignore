@@ -4,7 +4,8 @@
 *.npz
 /results/
 /PRETHODNA_MERENJA/
-# Third-party model weights and transient downloads
+/backup/
+# Model weights and downloads
 /models/*.onnx
 /models/*.task
 /models/*.part
@@ -18,3 +19,11 @@ __pycache__/
 .env.*
 *.zip
 *.rar
+# Local images/video, never commit webcam captures
+*.jpg
+*.jpeg
+*.png
+*.mp4
+*.avi
+*.webm
+*.mov

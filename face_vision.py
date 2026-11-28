@@ -32,14 +32,14 @@ def get_models():
         if not path.exists() or digest(path) != sha:
             url = f'https://huggingface.co/opencv/{repo}/resolve/main/{filename}'
             temp = path.with_suffix('.part')
-            print(f'Preuzimanje modela: {filename}', flush=True)
+            print(f'Downloading model: {filename}', flush=True)
             try:
                 req = urllib.request.Request(url, headers={'User-Agent': 'FACE-VISION/0.1'})
                 with urllib.request.urlopen(req, timeout=90) as src, temp.open('wb') as dst:
                     while chunk := src.read(1024 * 1024):
                         dst.write(chunk)
                 if digest(temp) != sha:
-                    raise RuntimeError('SHA256 modela se ne podudara.')
+                    raise RuntimeError('Model SHA256 mismatch.')
                 temp.replace(path)
             finally:
                 temp.unlink(missing_ok=True)
@@ -51,7 +51,7 @@ def normalize(feature):
     vector = np.asarray(feature, dtype=np.float32).reshape(-1)
     norm = np.linalg.norm(vector)
     if vector.size != 128 or not np.isfinite(norm) or norm < 1e-8:
-        raise ValueError('Neispravan vektor lica.')
+        raise ValueError('Invalid face embedding.')
     return vector / norm
 
 
@@ -84,7 +84,7 @@ def open_camera(index):
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
             return cap
         cap.release()
-    raise RuntimeError('Kamera nije dostupna. Zatvori aplikacije koje je koriste ili probaj --camera 1.')
+    raise RuntimeError('Camera unavailable. Close other camera applications or try --camera 1.')
 
 
 def text(frame, value, pos, color=(235, 235, 235), size=0.55):
@@ -92,18 +92,18 @@ def text(frame, value, pos, color=(235, 235, 235), size=0.55):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Lokalna demonstracija prepoznavanja sopstvenog lica.')
+    parser = argparse.ArgumentParser(description='Local owner-face recognition demonstration.')
     parser.add_argument('--camera', type=int, default=0)
     parser.add_argument('--threshold', type=float, default=0.45)
     parser.add_argument('--self-test', action='store_true')
     args = parser.parse_args()
     if not 0 < args.threshold < 1:
-        parser.error('--threshold mora biti izmedju 0 i 1')
+        parser.error('--threshold must be between 0 and 1')
     if args.self_test:
         a = normalize(np.eye(128)[0]); b = normalize(np.eye(128)[1])
         assert abs(score(a, a) - 1) < 1e-6
         assert abs(score(a, b)) < 1e-6
-        print('SELF-TEST OK: normalizacija i kosinusna slicnost.')
+        print('SELF-TEST OK: normalization and cosine similarity.')
         return
     detector_path, recognizer_path = get_models()
     detector = cv2.FaceDetectorYN.create(detector_path, '', (640, 480), 0.85, 0.3, 100)
@@ -114,7 +114,7 @@ def main():
     last_sample = 0.0
     fps = 0.0
     failure_count = 0
-    print('E = registracija, X = brisanje profila, Q = izlaz. Esc = otkazivanje registracije.', flush=True)
+    print('E = enroll, X = erase profile, Q = quit. Esc = cancel enrollment.', flush=True)
     try:
         cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(WINDOW, 800, 650)
@@ -124,7 +124,7 @@ def main():
             if not ok or frame is None:
                 failure_count += 1
                 if failure_count >= 10:
-                    raise RuntimeError('Kamera ne salje sliku.')
+                    raise RuntimeError('Camera is not delivering frames.')
                 time.sleep(0.05)
                 continue
             failure_count = 0
@@ -199,5 +199,5 @@ if __name__ == '__main__':
     try:
         main()
     except Exception as exc:
-        print(f'GRESKA: {exc}', flush=True)
+        print(f'ERROR: {exc}', flush=True)
         raise SystemExit(1)

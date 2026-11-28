@@ -1,0 +1,64 @@
+{
+  "version": "Gesture Interface v0.2",
+  "report_date": "2026-11-28",
+  "source": "Provided local Codex report and controlled benchmark in delivered ZIP; not a fresh camera test",
+  "baseline_commit": "1b3bd81",
+  "workload": "identical public static frame, unpaced; real models and GUIs; browser mocked",
+  "fixture_source": "https://storage.googleapis.com/mediapipe-assets/woman_hands.jpg",
+  "fixture_sha256": "70cbeb38e198c9862202e0979c21a99b40ca980d3e7b250176c85b1636a40f12",
+  "crop_xywh": [
+    0,
+    250,
+    640,
+    480
+  ],
+  "conditions": {
+    "seconds": 15,
+    "warmup": 3,
+    "rounds": 2,
+    "size": "640x480",
+    "gesture_fps": 20
+  },
+  "run_fps": {
+    "baseline": [
+      24.379229,
+      16.576282
+    ],
+    "hidden": [
+      29.60502,
+      29.488869
+    ],
+    "visible": [
+      30.066858,
+      29.549258
+    ]
+  },
+  "median_processing_fps": {
+    "baseline": 20.47775538651495,
+    "hidden": 29.54694448529367,
+    "visible": 29.808058261643218
+  },
+  "change_percent": {
+    "hidden": 44.28800387346641,
+    "visible": 45.56311323687594
+  },
+  "local_windows_tests": {
+    "run": 82,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "publication_validation": {
+    "python_syntax": "all Python files parsed",
+    "pure_logic_tests_passed": 51,
+    "source_git_blob_hashes_match_uploaded_zip": true
+  },
+  "runtime_sha256": {
+    "app_py": "d7378fd899489b2ad108bec88f666ad1f4db75631ff8ce35636b0c662e1f0151",
+    "gestures_py": "c007c59ffcbb16f7621616bdbf11b0d4833fc15b36b2fc18f347d94bd19d1064",
+    "gesture_language_py": "c3bca1213f5b4a0b7082ccced3029824096636c97b84dfaf0035fdf9eb0b0a3c",
+    "gesture_interface_py": "8445095700df3edc24ccf040a64e4949888ce048d602cdf1f1c7a8d54539c1b7",
+    "launcher_ui_py": "da22c94a2ec15340096985c29aca5df9d65e0bc95f4d7b9eac0a26203ccc5df5"
+  },
+  "limits": "Two runs per condition on one machine; unpaced processing throughput, not webcam FPS. Removing developer rendering changes the workload; not an AI-model speedup. No recognition accuracy conclusion. Raw local results and private enrollment data omitted."
+}

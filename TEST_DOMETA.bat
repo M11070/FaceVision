@@ -2,12 +2,12 @@
 setlocal
 cd /d "%~dp0"
 if not exist data\owner.npy (
-  echo Prvo pokreni START.bat i registruj svoje lice tasterom E.
+  echo First run START.bat --developer and enroll your face with E.
   pause
   exit /b 1
 )
 for %%D in (0.5 1 2) do (
-  echo Postavi lice na %%D m od objektiva. Ostani sam u kadru do naredne poruke.
+  echo Position your face %%D m from the camera. Stay alone in view until the next prompt.
   pause
   for %%S in (640x480 1280x720 1920x1080) do (
     for %%M in (base exp) do (
@@ -16,5 +16,5 @@ for %%D in (0.5 1 2) do (
     )
   )
 )
-echo Gotovo. Rezultati su u fascikli results.
+echo Finished. Results are in the results folder.
 pause

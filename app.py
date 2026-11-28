@@ -3,6 +3,7 @@ import platform
 import time
 from collections import deque
 from pathlib import Path
+from queue import Empty
 
 import cv2
 import numpy as np
@@ -11,9 +12,24 @@ import face_vision as base
 from metrics import Measurement
 from tracking import Tracker, Enrollment, decide
 from gestures import GesturePipeline, draw_hands
+from gesture_language import BrowserAction, GestureLanguage
 
 WINDOW = 'FACE VISION | EXP'
 SIZES = ('640x480', '1280x720', '1920x1080')
+
+
+def draw_language_status(canvas, value, width):
+    # Hershey has no Unicode em dash: draw that one glyph as a line.
+    scale, color = .40, (235, 235, 235)
+    pieces = value.split('—')
+    widths = [cv2.getTextSize(p, cv2.FONT_HERSHEY_SIMPLEX, scale, 1)[0][0] for p in pieces]
+    x = width-sum(widths)-(12 if len(pieces) > 1 else 0)-12
+    for i, piece in enumerate(pieces):
+        base.text(canvas, piece, (x, 26), color, scale)
+        x += widths[i]
+        if i < len(pieces)-1:
+            cv2.line(canvas, (x+1, 22), (x+10, 22), color, 1, cv2.LINE_AA)
+            x += 12
 
 
 def usable(frame, face):
@@ -39,10 +55,11 @@ def camera(index, size):
             if ok and frame.shape[1::-1] == size:
                 return cap
         cap.release()
-    raise RuntimeError(f'Kamera {index} nije isporucila {size}.')
+    raise RuntimeError(f'Camera {index} did not deliver {size}.')
 
 
-def run(args):
+def run(args, *, frame_observer=None, stop_event=None, commands=None):
+    interface_mode = frame_observer is not None
     size = tuple(map(int, args.size.split('x')))
     detector_path, recognizer_path = base.get_models()
     detector = cv2.FaceDetectorYN.create(detector_path, '', size, .85, .3, 100)
@@ -50,9 +67,12 @@ def run(args):
     reference = (base.normalize(np.load(args.reference, allow_pickle=False))
                  if args.reference else base.load_profile())
     if args.distance and reference is None:
-        raise ValueError('Za test dometa prvo registruj vlasnika tasterom E.')
+        raise ValueError('Enroll the owner with E before a range test.')
     cap = camera(args.camera, size)
     gestures = GesturePipeline(enabled=not args.no_gestures, max_fps=args.gesture_fps)
+    language = None if interface_mode else GestureLanguage()
+    browser_action = None if interface_mode else BrowserAction()
+    language_enabled = not interface_mode and not getattr(args, 'no_gesture_language', False)
     measure = Measurement(args.warmup, args.seconds) if args.seconds else None
     hand_frames = dict(one_hand=0, two_hands=0, face_and_two_hands=0, owner_and_two_hands=0)
     gesture_toggles = 0
@@ -68,18 +88,22 @@ def run(args):
                 camera=args.camera, warmup_s=args.warmup, requested_s=args.seconds)
     def result_meta(complete):
         return meta | dict(complete=complete, gestures=gestures.stats(),
-                           gesture_toggles=gesture_toggles, measured_hand_frames=hand_frames)
+                           gesture_toggles=gesture_toggles, measured_hand_frames=hand_frames,
+                           gesture_language=(dict(enabled=False) if interface_mode else
+                                             language.stats() | dict(enabled=language_enabled,
+                                                                     browser=browser_action.stats())))
     try:
-        cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(WINDOW,800,650)
-        while True:
+        if not interface_mode:
+            cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(WINDOW,800,650)
+        while stop_event is None or not stop_event.is_set():
             start = time.perf_counter()
             ok, frame = cap.read()
             read = time.perf_counter()
             if not ok or frame is None:
-                raise RuntimeError('Prekinuto citanje kamere.')
+                raise RuntimeError('Camera read interrupted.')
             if frame.shape[1::-1] != size:
-                raise RuntimeError('Kamera je promenila rezoluciju tokom merenja.')
+                raise RuntimeError('Camera resolution changed during measurement.')
             gestures.submit(frame, read)
             _, output = detector.detect(frame)
             faces = [] if output is None else output
@@ -106,6 +130,7 @@ def run(args):
                 decide(tracks, scores, args.threshold, read)
             owners = ([tr.confirmed for tr in tracks] if exp else
                       [v is not None and v>=args.threshold for v in scores])
+            enrollment_was_active = enroll is not None
             if enroll is not None:
                 state = enroll.observe(tracks, features, read)
                 if state == 'cancel':
@@ -119,39 +144,59 @@ def run(args):
                         tr.clear()
                 owners = [False]*len(faces)
             identified = time.perf_counter()
-            canvas = cv2.copyMakeBorder(frame,42,78,0,0,cv2.BORDER_CONSTANT,value=(20,25,32))
-            def draw(box,label,color):
-                x,y,w,h = map(int,box)
-                cv2.rectangle(canvas,(x,y+42),(x+w,y+h+42),color,2)
-                base.text(canvas,label,(max(0,x),max(58,y+38)),color)
-            for i,box in enumerate(boxes):
-                label = f'ID {tracks[i].number}' if exp else 'FACE'
-                if owners[i]:
-                    label += ' OWNER'
-                if enroll is not None:
-                    label += f' {len(enroll.samples)}/12'
-                draw(box,label,(70,220,110) if owners[i] else (0,190,240))
-            for tr in tracker.tracks.values():
-                if not tr.visible:
-                    draw(tr.predict(read),f'ID {tr.number}',(145,145,145))
             hands = gestures.snapshot()
-            draw_hands(canvas, hands, size)
+            language_now = time.perf_counter()
+            action_requested = False
+            if interface_mode:
+                frame_observer(hands=hands, captured_at=read, produced_at=language_now,
+                               gestures_enabled=gestures.enabled, enrolling=enrollment_was_active,
+                               faces=len(faces), owner=any(owners))
+            else:
+                action_requested = language.update(hands, language_now,
+                                                   enabled=language_enabled and gestures.enabled,
+                                                   enrolling=enrollment_was_active,
+                                                   action_pending=browser_action.busy)
+                canvas = cv2.copyMakeBorder(frame,42,78,0,0,cv2.BORDER_CONSTANT,value=(20,25,32))
+                def draw(box,label,color):
+                    x,y,w,h = map(int,box)
+                    cv2.rectangle(canvas,(x,y+42),(x+w,y+h+42),color,2)
+                    base.text(canvas,label,(max(0,x),max(58,y+38)),color)
+                for i,box in enumerate(boxes):
+                    label = f'ID {tracks[i].number}' if exp else 'FACE'
+                    if owners[i]:
+                        label += ' OWNER'
+                    if enroll is not None:
+                        label += f' {len(enroll.samples)}/12'
+                    draw(box,label,(70,220,110) if owners[i] else (0,190,240))
+                for tr in tracker.tracks.values():
+                    if not tr.visible:
+                        draw(tr.predict(read),f'ID {tr.number}',(145,145,145))
+                draw_hands(canvas, hands, size)
             if measure and start >= measure.opened + measure.warmup:
                 hand_frames['one_hand'] += int(len(hands) == 1)
                 hand_frames['two_hands'] += int(len(hands) == 2)
                 hand_frames['face_and_two_hands'] += int(len(faces) > 0 and len(hands) == 2)
                 hand_frames['owner_and_two_hands'] += int(any(owners) and len(hands) == 2)
-            h = frame.shape[0]
-            fps = (len(ticks)-1)/(ticks[-1]-ticks[0]) if len(ticks)>1 else 0
-            base.text(canvas,'FACE VISION / EXP  |  LOCAL',(12,26))
-            status = message or ('Profile ready' if reference is not None else 'E: enroll your face')
-            base.text(canvas,status,(12,h+65))
-            base.text(canvas,f'Faces: {len(faces)}   FPS: {fps:.1f}   Threshold: {args.threshold:.2f}',(12,h+86))
-            base.text(canvas,'Q: stop test' if measure else 'E: enroll  X: erase profile  Q: quit  ESC: cancel',(12,h+109))
+            if not interface_mode:
+                h = frame.shape[0]
+                fps = (len(ticks)-1)/(ticks[-1]-ticks[0]) if len(ticks)>1 else 0
+                base.text(canvas,'FACE VISION / EXP  |  LOCAL',(12,26))
+                if language_enabled:
+                    draw_language_status(canvas, language.status(language_now), size[0])
+                status = message or ('Profile ready' if reference is not None else 'E: enroll your face')
+                base.text(canvas,status,(12,h+65))
+                base.text(canvas,f'Faces: {len(faces)}   FPS: {fps:.1f}   Threshold: {args.threshold:.2f}',(12,h+86))
+                base.text(canvas,'Q: stop test' if measure else 'E: enroll  X: erase profile  Q: quit  ESC: cancel',(12,h+109))
             same = bool(measure and previous is not None and np.array_equal(frame,previous))
             previous = frame if measure else None
-            cv2.imshow(WINDOW,canvas)
-            key = cv2.waitKey(1) & 255
+            if interface_mode:
+                try:
+                    key = commands.get_nowait() if commands is not None else 255
+                except Empty:
+                    key = 255
+            else:
+                cv2.imshow(WINDOW,canvas)
+                key = cv2.waitKey(1) & 255
             end = time.perf_counter()
             ticks.append(end)
             while len(ticks)>2 and ticks[1]<end-1:
@@ -159,18 +204,27 @@ def run(args):
             if measure and measure.add(start,read,detected,identified,end,sizes,any(owners),same):
                 measure.write(result_meta(True))
                 return
-            if key==ord('q') or (key==27 and enroll is None) or cv2.getWindowProperty(WINDOW,cv2.WND_PROP_VISIBLE)<1:
+            if (key==ord('q') or (key==27 and enroll is None)
+                    or (not interface_mode and cv2.getWindowProperty(WINDOW,cv2.WND_PROP_VISIBLE)<1)):
                 if measure:
                     measure.write(result_meta(False))
                     raise SystemExit(2)
                 return
             if key in (ord('g'), ord('G')):
                 gestures.set_enabled(not gestures.enabled)
+                if language is not None:
+                    language.reset(end, 'toggle')
+                action_requested = False
                 gesture_toggles += 1
-                print('Gestovi:', 'ukljuceni' if gestures.enabled else 'iskljuceni', flush=True)
+                print('Gestures:', 'enabled' if gestures.enabled else 'disabled', flush=True)
             if measure:
+                if action_requested and gestures.enabled:
+                    browser_action.submit()
                 continue
             if key==ord('e'):
+                if language is not None:
+                    language.reset(end, 'enrollment')
+                action_requested = False
                 if len(tracks)==1 and eligible[0]:
                     enroll = Enrollment(tracks[0].number)
                     message = 'Enrollment'
@@ -185,10 +239,13 @@ def run(args):
                 reference, enroll, message = None, None, 'Profile erased'
                 for tr in tracker.tracks.values():
                     tr.clear()
+            if action_requested and gestures.enabled and enroll is None:
+                browser_action.submit()
     finally:
         gestures.close()
         cap.release()
-        cv2.destroyAllWindows()
+        if not interface_mode:
+            cv2.destroyAllWindows()
 
 
 if __name__ == '__main__':
@@ -200,12 +257,26 @@ if __name__ == '__main__':
     p.add_argument('--warmup', type=float, default=3)
     p.add_argument('--seconds', type=float, default=0)
     p.add_argument('--distance', type=float, choices=(.5,1,2,3))
-    p.add_argument('--reference', type=Path, help='Postojeci profil samo za citanje u benchmarku.')
-    p.add_argument('--no-gestures', action='store_true', help='Pokretanje bez obrade ruku; G je ukljucuje.')
-    p.add_argument('--gesture-fps', type=float, default=20., help='Najvise obrada ruku u sekundi (podrazumevano 20).')
+    p.add_argument('--reference', type=Path, help='Read-only profile for benchmarking.')
+    p.add_argument('--no-gestures', action='store_true', help='Start without hand processing; G enables it.')
+    p.add_argument('--gesture-fps', type=float, default=20., help='Maximum hand inferences per second (default: 20).')
+    p.add_argument('--no-gesture-language', action='store_true', help='Developer mode: disable the v0.1 sequence while retaining hand gestures.')
+    display = p.add_mutually_exclusive_group()
+    display.add_argument('--developer', action='store_true', help='Original camera view and v0.1 controls.')
+    display.add_argument('--interface', action='store_true', help='v0.2 launcher, including time-limited usability tests.')
+    p.add_argument('--gesture-hold-ms', type=float, default=300., help='Confirmed gesture duration in milliseconds.')
+    p.add_argument('--menu-timeout', type=float, default=10., help='Menu inactivity timeout in seconds.')
+    p.add_argument('--launch-cooldown', type=float, default=5., help='Cooldown after launching an application, in seconds.')
     args = p.parse_args()
     if not 0<args.threshold<1 or args.seconds<0 or args.warmup<0 or not 1<=args.gesture_fps<=30:
-        p.error('Neispravni parametri.')
+        p.error('Invalid parameters.')
     if (args.reference or args.mode=='base' or args.distance) and not args.seconds:
-        p.error('Ova opcija zahteva vremenski ogranicen benchmark.')
-    run(args)
+        p.error('This option requires a time-limited benchmark.')
+    if args.developer or (not args.interface and (args.seconds or args.mode=='base' or args.distance)):
+        run(args)
+    else:
+        from launcher_ui import run_interface
+        try:
+            run_interface(args, engine=run)
+        except ValueError as exc:
+            p.error(str(exc))

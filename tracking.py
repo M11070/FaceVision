@@ -1,4 +1,4 @@
-"""Privremeni tragovi. Koordinate su u pikselima, vreme u sekundama."""
+"""Temporary tracks. Coordinates are in pixels; time is in seconds."""
 from dataclasses import dataclass
 from math import hypot
 

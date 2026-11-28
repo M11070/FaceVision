@@ -29,6 +29,12 @@ class Hand:
     world_landmarks: tuple
     gesture: str | None
     confidence: float
+    track_id: tuple[int, int] | None = None
+    observed_at: float = 0.
+    confirmed_since: float | None = None
+    association_ambiguous: bool = False
+    neutral: bool = False
+    neutral_since: float | None = None
 
 
 def decode(result, threshold=.60, margin=.15):
@@ -54,16 +60,18 @@ def decode(result, threshold=.60, margin=.15):
                       and side.category_name in ('Left', 'Right') else 'Hand')
         world = tuple((float(p.x), float(p.y), float(p.z))
                       for p in result.hand_world_landmarks[i])
+        neutral = bool(best and best.category_name == 'None' and best.score >= .70)
         hands.append(Hand((left, top, right-left, bottom-top), handedness, points,
-                          world, gesture, float(best.score) if gesture else 0.))
+                          world, gesture, float(best.score) if gesture else 0., neutral=neutral))
     return hands
 
 
 class Stabilizer:
     """Match up to two hands spatially; confirm a label over time per hand."""
-    def __init__(self, confirmation=.08, max_gap=.25):
+    def __init__(self, confirmation=.08, max_gap=.25, epoch=0):
         self.confirmation, self.max_gap = confirmation, max_gap
         self.tracks = []
+        self.epoch, self.counter = epoch, 0
 
     @staticmethod
     def affinity(a, b):
@@ -85,20 +93,46 @@ class Stabilizer:
         options = product(range(-1, len(old)), repeat=len(hands))
         valid = [a for a in options if len([i for i in a if i >= 0]) == len(set(i for i in a if i >= 0))
                  and all(j < 0 or weights[i][j] > .15 for i, j in enumerate(a))]
-        assignment = max(valid, key=lambda a: sum(weights[i][j] if j >= 0 else 0.
-                                                for i, j in enumerate(a)), default=())
+        def assignment_score(a):
+            return sum(weights[i][j] if j >= 0 else 0. for i, j in enumerate(a))
+        assignment = max(valid, key=assignment_score, default=())
+        best_score = assignment_score(assignment)
         current, views = [], []
         for i, (hand, j) in enumerate(zip(hands, assignment)):
             ranked = sorted(weights[i], reverse=True)
             ambiguous = len(ranked) > 1 and ranked[0]-ranked[1] < .15
             tr = old[j].copy() if j >= 0 and not ambiguous else {}
+            # Extra provenance only: do not alter the existing gesture-label filter.
+            column = sorted((row[j] for row in weights), reverse=True) if j >= 0 else []
+            side_flip = (j >= 0 and hand.handedness != 'Hand'
+                         and old[j]['hand'].handedness != 'Hand'
+                         and hand.handedness != old[j]['hand'].handedness)
+            alternative = max((assignment_score(a) for a in valid if a[i] != j), default=float('-inf'))
+            global_ambiguity = j >= 0 and best_score-alternative < .15
+            uncertain = (ambiguous or global_ambiguity or side_flip
+                         or (len(column) > 1 and column[0]-column[1] < .15))
+            if 'id' not in tr or uncertain:
+                self.counter += 1
+                tr['id'] = (self.epoch, self.counter)
             history = [(t, label) for t, label in tr.get('history', [])
                        if 0 <= now-t <= self.max_gap][-4:] + [(now, hand.gesture)]
             agreed = [t for t, label in history if label == hand.gesture]
             stable = (hand.gesture if hand.gesture is not None and len(agreed) >= 3
                       and now-agreed[0] >= self.confirmation else None)
             tr['history'] = history
-            views.append(replace(hand, gesture=stable))
+            since = (tr.get('confirmed_since') if tr.get('confirmed_gesture') == stable else None)
+            if stable is None or uncertain:
+                since = None
+            elif since is None:
+                since = now
+            tr.update(confirmed_gesture=stable, confirmed_since=since)
+            neutral_since = (tr.get('neutral_since',now) if hand.neutral and not uncertain else None)
+            if hand.neutral and not uncertain and neutral_since is None:
+                neutral_since = now
+            tr['neutral_since'] = neutral_since
+            views.append(replace(hand, gesture=stable, track_id=tr['id'], observed_at=now,
+                                 confirmed_since=since, association_ambiguous=uncertain,
+                                 neutral_since=neutral_since))
             tr.update(hand=hand, seen=now)
             current.append(tr)
         # A missing or unknown hand loses its previous label immediately.
@@ -110,7 +144,7 @@ class GesturePipeline:
     """CPU worker with a one-frame mailbox, bounded results, and no GUI calls."""
     def __init__(self, enabled=True, max_fps=20., max_width=640, stale_after=.25):
         if max_fps <= 0 or max_width < 1 or stale_after <= 0:
-            raise ValueError('Neispravna konfiguracija gestova.')
+            raise ValueError('Invalid gesture configuration.')
         self.max_fps, self.max_width, self.stale_after = max_fps, max_width, stale_after
         self._condition = Condition()
         self._enabled = False
@@ -180,7 +214,7 @@ class GesturePipeline:
             from mediapipe.tasks.python import vision
             from mediapipe.tasks.python.components.processors import classifier_options
             if not MODEL.is_file() or hashlib.sha256(MODEL.read_bytes()).hexdigest() != MODEL_SHA256:
-                raise RuntimeError('Nedostaje ili je ostecen models/gesture_recognizer.task.')
+                raise RuntimeError('models/gesture_recognizer.task is missing or corrupted.')
             options = vision.GestureRecognizerOptions(
                 base_options=mp.tasks.BaseOptions(model_asset_path=str(MODEL),
                                                  delegate=mp.tasks.BaseOptions.Delegate.CPU),
@@ -208,7 +242,7 @@ class GesturePipeline:
                 if time.perf_counter()-captured > self.stale_after:
                     continue
                 if generation != current_generation:
-                    stabilizer, generation = Stabilizer(), current_generation
+                    stabilizer, generation = Stabilizer(epoch=current_generation), current_generation
                 last_start = time.perf_counter()
                 h, w = frame.shape[:2]
                 if w > self.max_width:
@@ -236,7 +270,7 @@ class GesturePipeline:
                 self._error = f'{type(exc).__name__}: {exc}'
                 self._enabled, self._pending, self._latest = False, None, (0., ())
                 self._condition.notify_all()
-            print(f'Gestovi nisu dostupni: {self._error} Lica nastavljaju da rade.', file=sys.stderr, flush=True)
+            print(f'Gestures unavailable: {self._error} Face processing continues.', file=sys.stderr, flush=True)
         finally:
             if recognizer is not None:
                 recognizer.close()

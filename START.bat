@@ -18,6 +18,6 @@ if errorlevel 1 goto fail
 if errorlevel 1 goto fail
 exit /b 0
 :fail
-echo Pokretanje nije uspelo. Proveri poruku iznad.
+echo Startup failed. Check the message above.
 pause
 exit /b 1
